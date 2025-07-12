@@ -16,7 +16,7 @@
 package org.agrona;
 
 /**
- * Implementations of this interface can a resource that need to have external state tracked for deletion.
+ * Implementations of this interface manage a resource that needs to have external state tracked for deletion.
  */
 public interface ManagedResource
 {
