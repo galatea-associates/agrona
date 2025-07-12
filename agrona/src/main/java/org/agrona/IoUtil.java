@@ -211,6 +211,25 @@ public final class IoUtil
     }
 
     /**
+     * Create a directory, removing previous directory if it already exists.
+     *
+     * @param directory        the directory which definitely exists after this method call.
+     * @param descriptionLabel to associate with the directory for any exceptions.
+     */
+    public static void recreateDir(final File directory, final String descriptionLabel)
+    {
+        if (directory.exists())
+        {
+            delete(directory, false);
+        }
+
+        if (!directory.mkdirs())
+        {
+            throw new IllegalArgumentException("could not create " + descriptionLabel + " directory: " + directory);
+        }
+    }
+
+    /**
      * Delete file only if it already exists.
      *
      * @param file to delete.
