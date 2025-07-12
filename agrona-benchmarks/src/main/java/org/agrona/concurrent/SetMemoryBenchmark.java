@@ -88,12 +88,24 @@ public class SetMemoryBenchmark
     }
 
     /**
-     * Benchmark the {@link UnsafeBuffer#putIntAscii(int, int)} method.
+     * Benchmark the {@link UnsafeBuffer#setMemory(int, int, byte)} method.
      */
     @Benchmark
     public void benchmark()
     {
         unsafeBuffer.setMemory(index, length, (byte)0xFF);
+    }
+
+    /**
+     * Performs a setMemory operation on the configured buffer.
+     * This method provides direct access to the setMemory functionality for demonstration purposes.
+     */
+    public void setMemory()
+    {
+        if (unsafeBuffer != null)
+        {
+            unsafeBuffer.setMemory(index, length, (byte)0xFF);
+        }
     }
 
     /**
