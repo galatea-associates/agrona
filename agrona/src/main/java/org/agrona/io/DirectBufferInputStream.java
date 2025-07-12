@@ -165,6 +165,14 @@ public class DirectBufferInputStream extends InputStream
     /**
      * {@inheritDoc}
      */
+    public int read(final byte[] dstBytes)
+    {
+        return read(dstBytes, 0, dstBytes.length);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public int read(final byte[] dstBytes, final int dstOffset, final int length)
     {
         int bytesRead = -1;
