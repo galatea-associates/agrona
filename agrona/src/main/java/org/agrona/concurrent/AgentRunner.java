@@ -123,6 +123,16 @@ public class AgentRunner implements Runnable, AutoCloseable
     }
 
     /**
+     * Is the {@link Agent} currently running?
+     *
+     * @return true if the {@link Agent} is currently running, false otherwise.
+     */
+    public boolean isRunning()
+    {
+        return isRunning;
+    }
+
+    /**
      * Get the thread which is running that {@link Agent}.
      * <p>
      * If null then the runner has not been started. If {@link #TOMBSTONE} then the runner is being closed.
