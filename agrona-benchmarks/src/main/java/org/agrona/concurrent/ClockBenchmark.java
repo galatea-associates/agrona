@@ -56,7 +56,7 @@ public class ClockBenchmark
      * @return time in nanoseconds.
      */
     @Benchmark
-    public long nanoTime()
+    public long systemNanoTime()
     {
         return System.nanoTime();
     }
@@ -64,10 +64,10 @@ public class ClockBenchmark
     /**
      * Benchmark {@link System#currentTimeMillis()} method.
      *
-     * @return time in nanoseconds.
+     * @return time in milliseconds.
      */
     @Benchmark
-    public long currentTimeMillis()
+    public long systemCurrentTimeMillis()
     {
         return System.currentTimeMillis();
     }
@@ -78,7 +78,7 @@ public class ClockBenchmark
      * @return time in nanoseconds.
      */
     @Benchmark
-    public long nanoClock()
+    public long systemNanoClock()
     {
         return SystemNanoClock.INSTANCE.nanoTime();
     }
@@ -89,7 +89,7 @@ public class ClockBenchmark
      * @return time in milliseconds.
      */
     @Benchmark
-    public long epochClock()
+    public long systemEpochClock()
     {
         return SystemEpochClock.INSTANCE.time();
     }
@@ -100,7 +100,7 @@ public class ClockBenchmark
      * @return time in nanoseconds.
      */
     @Benchmark
-    public long epochNanoClock()
+    public long systemEpochNanoClock()
     {
         return SystemEpochNanoClock.INSTANCE.nanoTime();
     }
