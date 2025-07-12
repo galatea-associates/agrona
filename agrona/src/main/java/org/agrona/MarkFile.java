@@ -16,6 +16,7 @@
 package org.agrona;
 
 import org.agrona.concurrent.EpochClock;
+import org.agrona.concurrent.SystemEpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
 
 import java.io.File;
@@ -332,6 +333,35 @@ public class MarkFile implements AutoCloseable
     public void deleteDirectory(final boolean ignoreFailures)
     {
         IoUtil.delete(parentDir, ignoreFailures);
+    }
+
+    /**
+     * Delete parent directory without ignoring failures.
+     * This method provides a simplified interface for directory deletion where
+     * failures should be reported.
+     */
+    public void deleteDirectory()
+    {
+        deleteDirectory(false);
+    }
+
+    /**
+     * Check if this MarkFile instance is active using default parameters.
+     * This method provides a simplified interface for checking liveness without
+     * requiring explicit timeout and validation configuration.
+     * 
+     * @return {@code true} if this MarkFile is active and responding within the default timeout.
+     */
+    public boolean isActive()
+    {
+        return isActive(
+            mappedBuffer,
+            SystemEpochClock.INSTANCE,
+            5000L,  // 5 second default timeout
+            versionFieldOffset,
+            timestampFieldOffset,
+            version -> {}, // no-op version check
+            null);  // no logger
     }
 
     /**
