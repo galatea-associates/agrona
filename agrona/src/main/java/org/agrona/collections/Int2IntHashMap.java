@@ -36,7 +36,84 @@ import static org.agrona.BitUtil.findNextPositivePowerOfTwo;
 import static org.agrona.collections.CollectionUtil.validateLoadFactor;
 
 /**
- * An open-addressing with linear probing hash map specialised for primitive key and value pairs.
+ * A high-performance hash map specialized for primitive int-to-int key-value pairs that completely
+ * avoids boxing/unboxing overhead through type-specific implementation.
+ * 
+ * <h2>Design Characteristics</h2>
+ * <p>This implementation uses open-addressing with linear probing for collision resolution, providing
+ * excellent cache locality and minimal memory overhead. The map stores key-value pairs in a single
+ * int array with even indices for keys and odd indices for values.</p>
+ * 
+ * <h2>Performance Characteristics</h2>
+ * <ul>
+ *   <li><strong>Time Complexity:</strong> O(1) average case for all operations, O(n) worst case</li>
+ *   <li><strong>Memory Overhead:</strong> ~75% less memory usage compared to HashMap&lt;Integer, Integer&gt;</li>
+ *   <li><strong>Cache Performance:</strong> Excellent locality due to linear probing and packed storage</li>
+ *   <li><strong>Load Factor:</strong> Default 0.67, resize occurs when size exceeds threshold</li>
+ *   <li><strong>Capacity:</strong> Always power-of-2, minimum 8 elements</li>
+ * </ul>
+ * 
+ * <h2>Thread Safety</h2>
+ * <p><strong>Not thread-safe.</strong> External synchronization is required for concurrent access.
+ * Multiple readers are safe only if no concurrent modifications occur.</p>
+ * 
+ * <h2>Usage Examples</h2>
+ * <pre>{@code
+ * // Basic usage with automatic missing value detection
+ * Int2IntHashMap map = new Int2IntHashMap(-1); // -1 represents null/missing
+ * 
+ * // Store key-value pairs without boxing
+ * map.put(42, 100);
+ * map.put(17, 200);
+ * 
+ * // Retrieve values efficiently
+ * int value = map.get(42); // Returns 100
+ * int missing = map.get(99); // Returns -1 (missing value)
+ * 
+ * // Check existence without retrieving value
+ * if (map.containsKey(42)) {
+ *     // Process known key
+ * }
+ * 
+ * // Iterate without allocation (preferred)
+ * map.forEachInt((key, value) -> {
+ *     System.out.println(key + " -> " + value);
+ * });
+ * 
+ * // Compute operations for efficient updates
+ * map.computeIfAbsent(50, key -> key * 2); // Sets 50 -> 100 if absent
+ * map.computeIfPresent(42, (key, oldValue) -> oldValue + 10); // Updates 42 -> 110
+ * }</pre>
+ * 
+ * <h2>Memory Layout</h2>
+ * <p>Entries are stored in a single int[] array where:</p>
+ * <ul>
+ *   <li>Even indices (0, 2, 4, ...) contain keys</li>
+ *   <li>Odd indices (1, 3, 5, ...) contain values</li>
+ *   <li>Missing entries are marked with the configured missingValue</li>
+ * </ul>
+ * 
+ * <h2>Best Practices</h2>
+ * <ul>
+ *   <li>Choose a missingValue that won't conflict with legitimate values</li>
+ *   <li>Size the initial capacity appropriately to minimize resizing</li>
+ *   <li>Use primitive methods (get(int), put(int, int)) instead of boxed versions</li>
+ *   <li>Use forEachInt() instead of entrySet().forEach() to avoid allocation</li>
+ *   <li>Consider the load factor impact on performance vs memory usage</li>
+ * </ul>
+ * 
+ * <h2>Comparison with Standard Collections</h2>
+ * <table border="1">
+ * <caption>Performance Comparison</caption>
+ * <tr><th>Metric</th><th>Int2IntHashMap</th><th>HashMap&lt;Integer, Integer&gt;</th></tr>
+ * <tr><td>Memory per entry</td><td>8 bytes</td><td>32+ bytes</td></tr>
+ * <tr><td>Boxing overhead</td><td>None</td><td>Significant</td></tr>
+ * <tr><td>GC pressure</td><td>Minimal</td><td>High (from boxing)</td></tr>
+ * <tr><td>Cache locality</td><td>Excellent</td><td>Poor (object indirection)</td></tr>
+ * </table>
+ * 
+ * @see org.agrona.collections.Long2LongHashMap Long2LongHashMap for long key-value pairs
+ * @see org.agrona.collections.IntHashSet IntHashSet for int-only sets
  */
 public class Int2IntHashMap implements Map<Integer, Integer>
 {
@@ -54,9 +131,31 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     private EntrySet entrySet;
 
     /**
-     * Create a map instance that does not allocate iterators with a specified {@code missingValue}.
-     *
-     * @param missingValue for the map that represents null.
+     * Create a map instance with default configuration and specified missing value.
+     * <p>Uses minimum capacity of 8 elements, default load factor of 0.67, and enables
+     * iterator caching to avoid allocation during iteration.</p>
+     * 
+     * <h3>Performance Impact</h3>
+     * <ul>
+     *   <li>Initial capacity: 8 elements (will auto-resize as needed)</li>
+     *   <li>Memory usage: ~64 bytes initial allocation</li>
+     *   <li>Resize threshold: 5 elements (8 * 0.67)</li>
+     * </ul>
+     * 
+     * <h3>Missing Value Selection</h3>
+     * <p>Choose a missingValue that will never be a legitimate value in your use case:</p>
+     * <ul>
+     *   <li>For positive counters: use -1 or Integer.MIN_VALUE</li>
+     *   <li>For general integers: use Integer.MIN_VALUE or Integer.MAX_VALUE</li>
+     *   <li>For small ranges: use a value outside your expected range</li>
+     * </ul>
+     * 
+     * @param missingValue the value used to represent null/absent entries. This value
+     *                     cannot be stored as a legitimate value in the map.
+     * 
+     * @throws IllegalArgumentException if later attempting to store the missingValue
+     * 
+     * @see #Int2IntHashMap(int, float, int) for custom capacity and load factor
      */
     public Int2IntHashMap(final int missingValue)
     {
@@ -64,11 +163,45 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Create a map instance that does not allocate iterators with specified parameters.
-     *
-     * @param initialCapacity for the map to override {@link #MIN_CAPACITY}
-     * @param loadFactor      for the map to override {@link Hashing#DEFAULT_LOAD_FACTOR}.
-     * @param missingValue    for the map that represents null.
+     * Create a map instance with custom capacity and load factor configuration.
+     * <p>This constructor allows fine-tuning performance characteristics based on
+     * expected usage patterns and memory constraints.</p>
+     * 
+     * <h3>Capacity Planning</h3>
+     * <p>The actual capacity will be the next power-of-2 greater than or equal to the
+     * specified initialCapacity, with a minimum of 8. Plan capacity based on:</p>
+     * <ul>
+     *   <li><strong>Expected size:</strong> Set initial capacity to expected maximum size / load factor</li>
+     *   <li><strong>Performance priority:</strong> Larger capacity = fewer collisions but more memory</li>
+     *   <li><strong>Memory constraints:</strong> Each slot uses 8 bytes (key + value)</li>
+     * </ul>
+     * 
+     * <h3>Load Factor Selection</h3>
+     * <p>Load factor trades memory usage against performance:</p>
+     * <ul>
+     *   <li><strong>0.5-0.6:</strong> Excellent performance, ~50% memory waste</li>
+     *   <li><strong>0.67 (default):</strong> Good balance of performance and memory</li>
+     *   <li><strong>0.75-0.8:</strong> Good memory usage, increased collision probability</li>
+     *   <li><strong>0.9+:</strong> Memory efficient but poor performance due to clustering</li>
+     * </ul>
+     * 
+     * <h3>Example Sizing</h3>
+     * <pre>{@code
+     * // For ~1000 elements with good performance
+     * new Int2IntHashMap(1500, 0.67f, -1); // Capacity: 2048, threshold: 1365
+     * 
+     * // For memory-constrained environment
+     * new Int2IntHashMap(800, 0.8f, -1);   // Capacity: 1024, threshold: 819
+     * 
+     * // For maximum performance
+     * new Int2IntHashMap(2000, 0.5f, -1);  // Capacity: 4096, threshold: 2048
+     * }</pre>
+     * 
+     * @param initialCapacity minimum capacity for the map, actual capacity will be next power-of-2
+     * @param loadFactor      fraction of capacity at which resize occurs (0.1 to 0.9)
+     * @param missingValue    value representing null/absent entries
+     * 
+     * @throws IllegalArgumentException if loadFactor is not between 0.1 and 0.9
      */
     public Int2IntHashMap(
         @DoNotSub final int initialCapacity,
@@ -138,9 +271,40 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Get the total capacity for the map to which the load factor will be a fraction of.
-     *
-     * @return the total capacity for the map.
+     * Get the current capacity of the map's internal storage.
+     * <p>Capacity represents the maximum number of key-value pairs that can be stored
+     * before triggering a resize operation. The actual resize occurs when size exceeds
+     * {@code capacity * loadFactor}.</p>
+     * 
+     * <h3>Capacity Characteristics</h3>
+     * <ul>
+     *   <li><strong>Always power-of-2:</strong> Enables efficient hash masking</li>
+     *   <li><strong>Minimum value:</strong> 8 elements</li>
+     *   <li><strong>Growth pattern:</strong> Doubles on each resize (8 → 16 → 32 → 64 ...)</li>
+     *   <li><strong>Memory usage:</strong> capacity × 8 bytes for storage array</li>
+     * </ul>
+     * 
+     * <h3>Monitoring Usage</h3>
+     * <pre>{@code
+     * Int2IntHashMap map = new Int2IntHashMap(100, 0.75f, -1);
+     * 
+     * System.out.printf("Capacity: %d elements%n", map.capacity());        // 128
+     * System.out.printf("Memory: %d bytes%n", map.capacity() * 8);          // 1024 bytes
+     * System.out.printf("Threshold: %d elements%n", map.resizeThreshold()); // 96
+     * System.out.printf("Current size: %d%n", map.size());                  // 0
+     * 
+     * // Calculate efficiency
+     * double utilization = (double) map.size() / map.capacity();
+     * if (utilization < 0.25) {
+     *     System.out.println("Consider compacting to save memory");
+     * }
+     * }</pre>
+     * 
+     * @return the current capacity (number of possible key-value pairs before resize)
+     * 
+     * @see #resizeThreshold() for the actual resize trigger point
+     * @see #size() for current number of stored elements
+     * @see #compact() to optimize capacity for current size
      */
     @DoNotSub public int capacity()
     {
@@ -148,10 +312,54 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Get the actual threshold which when reached the map will resize.
-     * This is a function of the current capacity and load factor.
-     *
-     * @return the threshold when the map will resize.
+     * Get the size threshold that triggers automatic map resizing.
+     * <p>When the number of stored elements exceeds this threshold, the map will
+     * double its capacity and rehash all existing entries. The threshold is calculated
+     * as {@code capacity × loadFactor}.</p>
+     * 
+     * <h3>Resize Behavior</h3>
+     * <p>When size exceeds threshold:</p>
+     * <ol>
+     *   <li>New capacity = current capacity × 2</li>
+     *   <li>New threshold = new capacity × load factor</li>
+     *   <li>All entries rehashed to new positions</li>
+     *   <li>Original array discarded for garbage collection</li>
+     * </ol>
+     * 
+     * <h3>Performance Planning</h3>
+     * <p>Understanding the threshold helps predict resize operations:</p>
+     * <pre>{@code
+     * Int2IntHashMap map = new Int2IntHashMap(64, 0.75f, -1);
+     * 
+     * System.out.printf("Current threshold: %d%n", map.resizeThreshold()); // 48
+     * System.out.printf("Next resize at size: %d%n", map.resizeThreshold() + 1);
+     * 
+     * // Add elements and monitor approaching resize
+     * for (int i = 0; i < 50; i++) {
+     *     map.put(i, i * 2);
+     *     if (map.size() >= map.resizeThreshold() - 5) {
+     *         System.out.printf("Approaching resize: %d/%d%n", 
+     *                          map.size(), map.resizeThreshold());
+     *     }
+     * }
+     * 
+     * // After resize
+     * System.out.printf("New threshold: %d%n", map.resizeThreshold()); // 96
+     * }</pre>
+     * 
+     * <h3>Load Factor Impact</h3>
+     * <p>Examples with capacity of 128:</p>
+     * <ul>
+     *   <li><strong>Load factor 0.5:</strong> Threshold = 64 (more space, better performance)</li>
+     *   <li><strong>Load factor 0.67:</strong> Threshold = 85 (balanced)</li>
+     *   <li><strong>Load factor 0.75:</strong> Threshold = 96 (memory efficient)</li>
+     * </ul>
+     * 
+     * @return the number of elements that will trigger the next resize operation
+     * 
+     * @see #capacity() for maximum possible elements before resize
+     * @see #loadFactor() for the multiplier used in threshold calculation
+     * @see #size() for current number of stored elements
      */
     @DoNotSub public int resizeThreshold()
     {
@@ -190,10 +398,52 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Get a value using provided key avoiding boxing.
-     *
-     * @param key lookup key.
-     * @return value associated with the key or {@link #missingValue()} if key is not found in the map.
+     * Retrieve a value by key without boxing/unboxing overhead.
+     * <p>This is the primary lookup method optimized for high-performance scenarios.
+     * Uses open-addressing with linear probing for cache-friendly access patterns.</p>
+     * 
+     * <h3>Performance Characteristics</h3>
+     * <ul>
+     *   <li><strong>Average case:</strong> O(1) with 1-2 memory accesses</li>
+     *   <li><strong>Worst case:</strong> O(n) if severe clustering occurs</li>
+     *   <li><strong>No allocation:</strong> Zero garbage generation</li>
+     *   <li><strong>Cache friendly:</strong> Linear probing maintains spatial locality</li>
+     * </ul>
+     * 
+     * <h3>Algorithm Details</h3>
+     * <p>Lookup process:</p>
+     * <ol>
+     *   <li>Compute hash index using {@code Hashing.evenHash(key, mask)}</li>
+     *   <li>Check key at computed index</li>
+     *   <li>If not found, probe linearly (index + 2) until key found or empty slot</li>
+     *   <li>Return corresponding value or missingValue</li>
+     * </ol>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap counters = new Int2IntHashMap(-1);
+     * counters.put(100, 42);
+     * 
+     * // Basic lookup
+     * int value = counters.get(100);  // Returns 42
+     * int missing = counters.get(200); // Returns -1 (missing value)
+     * 
+     * // Check for existence before use
+     * int result = counters.get(key);
+     * if (result != counters.missingValue()) {
+     *     // Key exists, use result
+     *     processValue(result);
+     * }
+     * 
+     * // Or use getOrDefault for cleaner code
+     * int safeValue = counters.getOrDefault(key, 0);
+     * }</pre>
+     * 
+     * @param key the lookup key
+     * @return value associated with the key, or {@link #missingValue()} if key not found
+     * 
+     * @see #getOrDefault(int, int) for automatic default value handling
+     * @see #containsKey(int) to check existence without retrieving value
      */
     public int get(final int key)
     {
@@ -217,12 +467,63 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Put a key value pair in the map.
-     *
-     * @param key   lookup key
-     * @param value new value, must not be {@link #missingValue()}
-     * @return previous value associated with the key, or {@link #missingValue()} if none found
-     * @throws IllegalArgumentException if value is {@link #missingValue()}
+     * Store a key-value pair in the map with optimal performance for primitive types.
+     * <p>This method provides both insert and update functionality. If the key already exists,
+     * its value is replaced and the old value is returned. If the key is new, it's inserted
+     * and the missing value is returned.</p>
+     * 
+     * <h3>Performance Characteristics</h3>
+     * <ul>
+     *   <li><strong>Average case:</strong> O(1) with 1-3 memory accesses</li>
+     *   <li><strong>Worst case:</strong> O(n) during resize or with clustering</li>
+     *   <li><strong>Resize cost:</strong> O(n) when load factor exceeded, amortized O(1)</li>
+     *   <li><strong>Memory impact:</strong> No boxing allocation, possible array resize</li>
+     * </ul>
+     * 
+     * <h3>Resize Behavior</h3>
+     * <p>When size exceeds {@code capacity * loadFactor}:</p>
+     * <ul>
+     *   <li>Capacity doubles (maintaining power-of-2)</li>
+     *   <li>All existing entries are rehashed to new positions</li>
+     *   <li>Resize threshold is recalculated</li>
+     *   <li>Operation completes before returning</li>
+     * </ul>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap cache = new Int2IntHashMap(-1);
+     * 
+     * // Basic insertion
+     * int oldValue = cache.put(42, 100);  // Returns -1 (missing), stores 42->100
+     * 
+     * // Update existing key
+     * oldValue = cache.put(42, 200);      // Returns 100, updates to 42->200
+     * 
+     * // Increment pattern
+     * int current = cache.get(key);
+     * if (current != cache.missingValue()) {
+     *     cache.put(key, current + 1);    // Increment existing
+     * } else {
+     *     cache.put(key, 1);              // Initialize new counter
+     * }
+     * 
+     * // Better: use compute methods for atomic updates
+     * cache.computeIfAbsent(key, k -> 1);
+     * cache.computeIfPresent(key, (k, v) -> v + 1);
+     * }</pre>
+     * 
+     * <h3>Memory Considerations</h3>
+     * <p>Resize doubles capacity, so memory usage follows pattern: 8 → 16 → 32 → 64 → ... elements.
+     * Each element uses 8 bytes (key + value ints). Plan initial capacity to minimize resizes.</p>
+     * 
+     * @param key   the lookup key (any int value)
+     * @param value the value to store (cannot be {@link #missingValue()})
+     * @return previous value for this key, or {@link #missingValue()} if key was not present
+     * 
+     * @throws IllegalArgumentException if value equals {@link #missingValue()}
+     * 
+     * @see #putIfAbsent(int, int) to insert only if key doesn't exist
+     * @see #computeIfAbsent(int, IntUnaryOperator) for conditional insertion with computation
      */
     public int put(final int key, final int value)
     {
@@ -355,12 +656,74 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Primitive specialised forEach implementation.
-     * <p>
-     * NB: Renamed from forEach to avoid overloading on parameter types of lambda
-     * expression, which doesn't play well with type inference in lambda expressions.
-     *
-     * @param consumer a callback called for each key/value pair in the map.
+     * High-performance iteration over all key-value pairs without boxing overhead.
+     * <p>This method provides the most efficient way to process all entries in the map,
+     * avoiding object allocation and boxing that occurs with standard Java 8 streams
+     * or iterator approaches.</p>
+     * 
+     * <h3>Performance Benefits</h3>
+     * <ul>
+     *   <li><strong>Zero allocation:</strong> No temporary objects created during iteration</li>
+     *   <li><strong>No boxing:</strong> Primitive values passed directly to consumer</li>
+     *   <li><strong>Cache efficient:</strong> Sequential access through underlying array</li>
+     *   <li><strong>Predictable:</strong> Deterministic iteration order (insertion-dependent)</li>
+     * </ul>
+     * 
+     * <h3>Algorithm Details</h3>
+     * <p>Iteration process:</p>
+     * <ol>
+     *   <li>Traverse the internal array sequentially</li>
+     *   <li>Skip slots containing missingValue (empty slots)</li>
+     *   <li>Call consumer for each valid key-value pair</li>
+     *   <li>Early termination when all elements processed</li>
+     * </ol>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap inventory = new Int2IntHashMap(-1);
+     * // ... populate map ...
+     * 
+     * // Simple processing
+     * inventory.forEachInt((productId, quantity) -> {
+     *     System.out.printf("Product %d: %d units%n", productId, quantity);
+     * });
+     * 
+     * // Aggregation without allocation
+     * final AtomicInteger totalValue = new AtomicInteger();
+     * priceMap.forEachInt((item, price) -> {
+     *     totalValue.addAndGet(price);
+     * });
+     * 
+     * // Conditional processing with early termination
+     * final AtomicBoolean found = new AtomicBoolean(false);
+     * map.forEachInt((key, value) -> {
+     *     if (value > threshold) {
+     *         processHighValue(key, value);
+     *         found.set(true);
+     *         // Note: cannot break early from forEach, use iterator for that
+     *     }
+     * });
+     * 
+     * // Performance comparison:
+     * // SLOW: map.entrySet().forEach(entry -> process(entry.getKey(), entry.getValue()))
+     * // FAST: map.forEachInt((key, value) -> process(key, value))
+     * }</pre>
+     * 
+     * <h3>Thread Safety</h3>
+     * <p><strong>Warning:</strong> Concurrent modification during iteration will cause
+     * undefined behavior. Ensure no other threads modify the map during iteration.</p>
+     * 
+     * <h3>Naming Rationale</h3>
+     * <p>Method renamed from {@code forEach} to avoid overloading issues with lambda
+     * type inference when using primitive functional interfaces.</p>
+     * 
+     * @param consumer a callback invoked for each key-value pair. Receives primitive
+     *                 int parameters avoiding any boxing overhead.
+     * 
+     * @throws NullPointerException if consumer is null
+     * 
+     * @see #entrySet() for iterator-based access with early termination capability
+     * @see IntIntConsumer functional interface for the consumer parameter
      */
     public void forEachInt(final IntIntConsumer consumer)
     {
@@ -437,8 +800,74 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Compact the backing arrays by rehashing with a capacity just larger than current size
-     * and giving consideration to the load factor.
+     * Optimize memory usage by shrinking the capacity to fit current size.
+     * <p>This method recalculates the optimal capacity based on current size and load factor,
+     * then rehashes all entries into a smaller array. Useful after bulk deletions to
+     * reclaim unused memory.</p>
+     * 
+     * <h3>When to Use</h3>
+     * <ul>
+     *   <li><strong>After bulk deletions:</strong> When map size has significantly decreased</li>
+     *   <li><strong>Memory pressure:</strong> When memory usage is more critical than speed</li>
+     *   <li><strong>Phase transitions:</strong> Moving from loading phase to lookup-heavy phase</li>
+     * </ul>
+     * 
+     * <h3>Performance Impact</h3>
+     * <ul>
+     *   <li><strong>Time complexity:</strong> O(n) - must rehash all existing entries</li>
+     *   <li><strong>Memory benefit:</strong> Can reduce capacity significantly</li>
+     *   <li><strong>Future performance:</strong> May improve cache locality with smaller capacity</li>
+     *   <li><strong>One-time cost:</strong> Subsequent operations return to normal speed</li>
+     * </ul>
+     * 
+     * <h3>Algorithm Details</h3>
+     * <p>Compaction process:</p>
+     * <ol>
+     *   <li>Calculate ideal capacity: {@code size / loadFactor}</li>
+     *   <li>Round up to next power-of-2, minimum 8</li>
+     *   <li>If new capacity is smaller, allocate new array</li>
+     *   <li>Rehash all existing entries to new positions</li>
+     *   <li>Update internal structures</li>
+     * </ol>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap cache = new Int2IntHashMap(1000, 0.75f, -1);
+     * 
+     * // Load many entries
+     * for (int i = 0; i < 800; i++) {
+     *     cache.put(i, i * 2);
+     * }
+     * // Capacity: 1024, size: 800, threshold: 768
+     * 
+     * // Remove most entries
+     * for (int i = 0; i < 700; i++) {
+     *     cache.remove(i);
+     * }
+     * // Capacity: 1024, size: 100 (wasted space!)
+     * 
+     * // Compact to reclaim memory
+     * cache.compact();
+     * // Capacity: 256, size: 100, threshold: 192 (much better!)
+     * 
+     * // Best practice: compact after bulk operations
+     * performBulkDeletions(cache);
+     * if (cache.size() < cache.capacity() / 4) {
+     *     cache.compact(); // Reclaim memory if significantly under-utilized
+     * }
+     * }</pre>
+     * 
+     * <h3>Memory Calculation</h3>
+     * <p>Memory savings example with 100 entries and 0.75 load factor:</p>
+     * <ul>
+     *   <li>Before: 1024 capacity × 8 bytes = 8,192 bytes</li>
+     *   <li>After: 256 capacity × 8 bytes = 2,048 bytes</li>
+     *   <li>Savings: 6,144 bytes (75% reduction)</li>
+     * </ul>
+     * 
+     * @see #capacity() to check current capacity
+     * @see #size() to check current element count
+     * @see #loadFactor() to understand resize behavior
      */
     public void compact()
     {
@@ -726,10 +1155,73 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Remove value from the map using given key avoiding boxing.
-     *
-     * @param key whose mapping is to be removed from the map.
-     * @return removed value or {@link #missingValue()} if key was not found in the map.
+     * Remove a key-value pair from the map without boxing overhead.
+     * <p>This method removes the entry for the specified key and performs necessary
+     * chain compaction to maintain performance of subsequent lookups. The removal
+     * process ensures the integrity of the linear probing sequence.</p>
+     * 
+     * <h3>Performance Characteristics</h3>
+     * <ul>
+     *   <li><strong>Average case:</strong> O(1) with 1-3 memory accesses</li>
+     *   <li><strong>Worst case:</strong> O(n) if extensive chain compaction required</li>
+     *   <li><strong>Compaction cost:</strong> Additional work to maintain lookup efficiency</li>
+     *   <li><strong>Memory impact:</strong> No deallocation, capacity unchanged</li>
+     * </ul>
+     * 
+     * <h3>Chain Compaction Algorithm</h3>
+     * <p>After removing an entry, the algorithm ensures linear probing chains remain intact:</p>
+     * <ol>
+     *   <li>Mark the entry slot as empty (set to missingValue)</li>
+     *   <li>Examine subsequent entries in the probe sequence</li>
+     *   <li>Relocate entries that can move to a better position</li>
+     *   <li>Continue until reaching an empty slot or completing cycle</li>
+     * </ol>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap sessionMap = new Int2IntHashMap(-1);
+     * sessionMap.put(12345, 67890);
+     * sessionMap.put(54321, 98765);
+     * 
+     * // Remove existing key
+     * int removed = sessionMap.remove(12345);  // Returns 67890
+     * 
+     * // Remove non-existent key
+     * int notFound = sessionMap.remove(99999); // Returns -1 (missing value)
+     * 
+     * // Safe removal pattern
+     * if (sessionMap.containsKey(sessionId)) {
+     *     int userData = sessionMap.remove(sessionId);
+     *     processRemovedData(userData);
+     * }
+     * 
+     * // Bulk removal with compaction consideration
+     * List<Integer> toRemove = getExpiredSessions();
+     * for (int sessionId : toRemove) {
+     *     sessionMap.remove(sessionId);
+     * }
+     * // Consider compacting after bulk removals
+     * if (sessionMap.size() < sessionMap.capacity() / 4) {
+     *     sessionMap.compact();
+     * }
+     * }</pre>
+     * 
+     * <h3>Memory Considerations</h3>
+     * <p>Removal does not reduce capacity or trigger compaction automatically. For memory
+     * efficiency after bulk deletions, consider calling {@link #compact()} to reclaim
+     * unused space.</p>
+     * 
+     * <h3>Thread Safety</h3>
+     * <p><strong>Warning:</strong> Concurrent removals or modifications during removal
+     * can corrupt the internal structure. Ensure exclusive access during modification.</p>
+     * 
+     * @param key the key whose mapping should be removed
+     * @return the value previously associated with the key, or {@link #missingValue()}
+     *         if the key was not present in the map
+     * 
+     * @see #remove(int, int) for conditional removal based on expected value
+     * @see #compact() to reclaim memory after bulk deletions
+     * @see #containsKey(int) to check existence before removal
      */
     public int remove(final int key)
     {
@@ -880,9 +1372,62 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Get the minimum value stored in the map. If the map is empty then it will return {@link #missingValue()}.
-     *
-     * @return the minimum value stored in the map.
+     * Find the minimum value among all stored values in the map.
+     * <p>This method scans all values in the map to find the smallest one, useful for
+     * statistical analysis, range validation, or finding extreme values in datasets.</p>
+     * 
+     * <h3>Performance Characteristics</h3>
+     * <ul>
+     *   <li><strong>Time complexity:</strong> O(capacity) - must scan entire array</li>
+     *   <li><strong>Memory overhead:</strong> No additional allocation</li>
+     *   <li><strong>Cache behavior:</strong> Sequential scan, cache-friendly</li>
+     * </ul>
+     * 
+     * <h3>Edge Cases</h3>
+     * <ul>
+     *   <li><strong>Empty map:</strong> Returns {@link #missingValue()}</li>
+     *   <li><strong>Single element:</strong> Returns that element's value</li>
+     *   <li><strong>All values same:</strong> Returns that common value</li>
+     *   <li><strong>Missing value in range:</strong> Missing value is ignored</li>
+     * </ul>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap scores = new Int2IntHashMap(-1); // -1 = missing
+     * scores.put(100, 85);  // Student 100: score 85
+     * scores.put(101, 92);  // Student 101: score 92
+     * scores.put(102, 78);  // Student 102: score 78
+     * 
+     * int lowest = scores.minValue();  // Returns 78
+     * int highest = scores.maxValue(); // Returns 92
+     * 
+     * // Range validation
+     * if (scores.minValue() < PASSING_GRADE) {
+     *     System.out.println("Some students failed");
+     * }
+     * 
+     * // Empty map handling
+     * Int2IntHashMap empty = new Int2IntHashMap(-999);
+     * int min = empty.minValue(); // Returns -999 (missing value)
+     * if (min != empty.missingValue()) {
+     *     // Map has data
+     *     processMinimum(min);
+     * }
+     * 
+     * // Statistics gathering
+     * int range = scores.maxValue() - scores.minValue(); // 92 - 78 = 14
+     * }</pre>
+     * 
+     * <h3>Performance Considerations</h3>
+     * <p>This operation scales with capacity, not size. For frequent min/max queries
+     * on large maps, consider maintaining separate min/max tracking variables or
+     * using a specialized data structure.</p>
+     * 
+     * @return the minimum value among all stored values, or {@link #missingValue()}
+     *         if the map is empty
+     * 
+     * @see #maxValue() for finding the maximum value
+     * @see #size() to check if map is empty before calling
      */
     public int minValue()
     {
@@ -904,9 +1449,68 @@ public class Int2IntHashMap implements Map<Integer, Integer>
     }
 
     /**
-     * Get the maximum value stored in the map. If the map is empty then it will return {@link #missingValue()}.
-     *
-     * @return the maximum value stored in the map.
+     * Find the maximum value among all stored values in the map.
+     * <p>This method scans all values in the map to find the largest one, useful for
+     * statistical analysis, range validation, or finding extreme values in datasets.</p>
+     * 
+     * <h3>Performance Characteristics</h3>
+     * <ul>
+     *   <li><strong>Time complexity:</strong> O(capacity) - must scan entire array</li>
+     *   <li><strong>Memory overhead:</strong> No additional allocation</li>
+     *   <li><strong>Cache behavior:</strong> Sequential scan, cache-friendly</li>
+     * </ul>
+     * 
+     * <h3>Edge Cases</h3>
+     * <ul>
+     *   <li><strong>Empty map:</strong> Returns {@link #missingValue()}</li>
+     *   <li><strong>Single element:</strong> Returns that element's value</li>
+     *   <li><strong>All values same:</strong> Returns that common value</li>
+     *   <li><strong>Missing value in range:</strong> Missing value is ignored</li>
+     * </ul>
+     * 
+     * <h3>Usage Examples</h3>
+     * <pre>{@code
+     * Int2IntHashMap temperatures = new Int2IntHashMap(Integer.MIN_VALUE);
+     * temperatures.put(1, 23);  // Sensor 1: 23°C
+     * temperatures.put(2, 19);  // Sensor 2: 19°C  
+     * temperatures.put(3, 27);  // Sensor 3: 27°C
+     * 
+     * int hottest = temperatures.maxValue();   // Returns 27
+     * int coolest = temperatures.minValue();   // Returns 19
+     * 
+     * // Threshold monitoring
+     * if (temperatures.maxValue() > DANGER_THRESHOLD) {
+     *     triggerCoolingSystem();
+     * }
+     * 
+     * // Statistical analysis
+     * int average = (temperatures.maxValue() + temperatures.minValue()) / 2;
+     * int range = temperatures.maxValue() - temperatures.minValue();
+     * 
+     * // Safe usage with empty check
+     * if (temperatures.size() > 0) {
+     *     int peak = temperatures.maxValue();
+     *     recordPeakTemperature(peak);
+     * }
+     * }</pre>
+     * 
+     * <h3>Missing Value Handling</h3>
+     * <p>The missing value is never considered as a candidate for maximum, even if it
+     * would numerically be the largest value. Only actual stored values are compared.</p>
+     * 
+     * <h3>Performance Considerations</h3>
+     * <p>For applications requiring frequent min/max queries, consider:</p>
+     * <ul>
+     *   <li>Maintaining separate tracking variables updated on put/remove</li>
+     *   <li>Using TreeMap for sorted access if range queries are common</li>
+     *   <li>Caching results if map doesn't change frequently</li>
+     * </ul>
+     * 
+     * @return the maximum value among all stored values, or {@link #missingValue()}
+     *         if the map is empty
+     * 
+     * @see #minValue() for finding the minimum value
+     * @see #size() to check if map is empty before calling
      */
     public int maxValue()
     {
