@@ -132,6 +132,16 @@ public class ExpandableDirectBufferOutputStream extends OutputStream
     /**
      * Write a byte[] to the buffer.
      *
+     * @param srcBytes to write
+     */
+    public void write(final byte[] srcBytes)
+    {
+        write(srcBytes, 0, srcBytes.length);
+    }
+
+    /**
+     * Write a byte[] to the buffer.
+     *
      * @param srcBytes  to write
      * @param srcOffset at which to begin reading bytes from the srcBytes.
      * @param length    of the srcBytes to read.

@@ -13,6 +13,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/**
+ * AGRONA BUILD CONFIGURATION DOCUMENTATION REFERENCE
+ * 
+ * This build configuration supports the following documentation-referenceable sections:
+ * 
+ * BUILD-CONFIGURATION EXPORTS:
+ * - shadow: Shadow plugin for fat JAR creation (lines 380, 394-409, 464, 472-476, 482, 496-500)
+ * - java-library: Java library plugin configuration (lines 17, 171, 179-184)
+ * - publishing: Maven publishing setup (lines 350-367, 434-452)
+ * - signing: Artifact signing configuration (lines 369-374, 454-460)
+ * - subprojects: Multi-module project configuration (lines 170-251, 253-522)
+ * - task definitions: Custom build tasks and execution (lines 289-293, 295-297, 333-337, 504-521)
+ * 
+ * For agent usage documentation, reference the following key configurations:
+ * - Agent JAR creation: shadowJar task in :agrona-agent project
+ * - Agent manifest: Premain-Class and Agent-Class configuration
+ * - ByteBuddy integration: ByteBuddy plugin and transformations
+ * - JVM arguments: Test configuration with agent loading flags
+ */
+// ============================================================================
+// JAVA-LIBRARY PLUGIN CONFIGURATION
+// Documentation Reference: Core Java library setup for multi-module build
+// ============================================================================
 plugins {
     id 'java-library'
     alias(libs.plugins.bnd).apply(false)
@@ -167,6 +191,11 @@ allprojects {
 
 jar.enabled = false
 
+// ============================================================================
+// SUBPROJECTS CONFIGURATION
+// Documentation Reference: Common configuration applied to all submodules
+// Includes: agrona (core), agrona-agent, agrona-benchmarks, agrona-concurrency-tests
+// ============================================================================
 subprojects {
     apply plugin: 'java-library'
     apply plugin: 'checkstyle'
@@ -286,6 +315,10 @@ project(':agrona') {
         }
     }
 
+    // ========================================================================
+    // TASK DEFINITIONS - Code Generation
+    // Documentation Reference: Custom tasks for primitive specializations and Unsafe API
+    // ========================================================================
     tasks.register('generatePrimitiveSpecialisations', JavaExec) {
         mainClass.set('org.agrona.generation.SpecialisationGenerator')
         classpath = sourceSets.main.runtimeClasspath
@@ -347,6 +380,10 @@ project(':agrona') {
         withJavadocJar()
     }
 
+    // ========================================================================
+    // PUBLISHING CONFIGURATION - Main Agrona Library
+    // Documentation Reference: Maven Central publishing setup
+    // ========================================================================
     publishing {
         publications {
             agrona(MavenPublication) {
@@ -366,6 +403,10 @@ project(':agrona') {
         }
     }
 
+    // ========================================================================
+    // SIGNING CONFIGURATION - Main Agrona Library
+    // Documentation Reference: GPG signing for artifact verification
+    // ========================================================================
     signing {
         if (null != signingKey) {
             useInMemoryPgpKeys(signingKey, signingPassword)
@@ -374,6 +415,11 @@ project(':agrona') {
     }
 }
 
+// ============================================================================
+// AGRONA-AGENT PROJECT CONFIGURATION
+// Documentation Reference: Java agent for buffer alignment checking
+// Key for Agent Usage Guide: Shadow JAR, agent manifest, ByteBuddy integration
+// ============================================================================
 project(':agrona-agent') {
     apply plugin: 'maven-publish'
     apply plugin: 'signing'
@@ -391,6 +437,11 @@ project(':agrona-agent') {
         testImplementation libs.byteBuddy.agent
     }
 
+    // ========================================================================
+    // SHADOW CONFIGURATION - Agent JAR Creation
+    // Documentation Reference: Creates executable agent JAR with ByteBuddy shading
+    // Agent Usage Guide: Essential for -javaagent JVM argument configuration
+    // ========================================================================
     shadowJar {
         archiveClassifier.set('')
 
@@ -431,6 +482,10 @@ project(':agrona-agent') {
         from javadoc.destinationDir
     }
 
+    // ========================================================================
+    // PUBLISHING CONFIGURATION - Agrona Agent
+    // Documentation Reference: Agent JAR publication to Maven Central
+    // ========================================================================
     publishing {
         publications {
             agronaAgent(MavenPublication) {
@@ -451,6 +506,10 @@ project(':agrona-agent') {
         }
     }
 
+    // ========================================================================
+    // SIGNING CONFIGURATION - Agrona Agent
+    // Documentation Reference: GPG signing for agent artifact verification
+    // ========================================================================
     signing {
         if (null != signingKey)
         {
@@ -460,6 +519,10 @@ project(':agrona-agent') {
     }
 }
 
+// ============================================================================
+// AGRONA-BENCHMARKS PROJECT CONFIGURATION  
+// Documentation Reference: JMH microbenchmarks for performance validation
+// ============================================================================
 project(':agrona-benchmarks') {
     apply plugin: 'com.gradleup.shadow'
 
@@ -469,6 +532,10 @@ project(':agrona-benchmarks') {
         implementation project(':agrona')
     }
 
+    // ========================================================================
+    // SHADOW CONFIGURATION - Benchmarks JAR
+    // Documentation Reference: JMH executable JAR for performance testing
+    // ========================================================================
     shadowJar {
         archiveFileName = 'benchmarks.jar'
         archiveClassifier.set('benchmarks')
@@ -478,6 +545,10 @@ project(':agrona-benchmarks') {
     jar.finalizedBy shadowJar
 }
 
+// ============================================================================
+// AGRONA-CONCURRENCY-TESTS PROJECT CONFIGURATION
+// Documentation Reference: JCStress concurrency correctness testing
+// ============================================================================
 project(':agrona-concurrency-tests') {
     apply plugin: 'com.gradleup.shadow'
 
@@ -493,6 +564,10 @@ project(':agrona-concurrency-tests') {
         }
     }
 
+    // ========================================================================
+    // SHADOW CONFIGURATION - Concurrency Tests JAR
+    // Documentation Reference: JCStress executable JAR for concurrency testing
+    // ========================================================================
     shadowJar {
         archiveFileName = 'concurrency-tests.jar'
         archiveClassifier.set('concurrency-tests')
@@ -501,6 +576,10 @@ project(':agrona-concurrency-tests') {
 
     jar.finalizedBy shadowJar
 
+    // ========================================================================
+    // TASK DEFINITIONS - Concurrency Test Execution
+    // Documentation Reference: Custom tasks for running JCStress tests with proper JVM args
+    // ========================================================================
     tasks.register('concurrencyTests', JavaExec) {
         dependsOn shadowJar
         classpath = files(tasks.shadowJar)
@@ -521,6 +600,10 @@ project(':agrona-concurrency-tests') {
     }
 }
 
+// ============================================================================
+// TASK DEFINITIONS - Test Reporting and Utility Tasks
+// Documentation Reference: Cross-project test reporting and maintenance tasks
+// ============================================================================
 tasks.register('testReport', TestReport) {
     destinationDirectory = file("${layout.buildDirectory.get()}/reports/allTests")
     // Include the results from the `test` task in all subprojects
@@ -540,6 +623,10 @@ tasks.named("dependencyUpdates").configure {
     }
 }
 
+// ========================================================================
+// TASK DEFINITIONS - CI/CD and Build Maintenance
+// Documentation Reference: Log collection, artifact upload, and build utilities
+// ========================================================================
 tasks.register('copyTestLogs', Copy) {
     from '.'
     include '**/*.hprof'

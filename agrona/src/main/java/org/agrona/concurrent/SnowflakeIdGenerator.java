@@ -78,6 +78,20 @@ public final class SnowflakeIdGenerator extends AbstractSnowflakeIdGeneratorPadd
      */
     public static final int SEQUENCE_BITS_DEFAULT = 12;
 
+    /**
+     * Alias for {@link #NODE_ID_BITS_DEFAULT} to support alternative naming convention.
+     * Default number of bits used to represent the distributed node or application which is {@code 10} bits allowing
+     * for 1024 nodes (0-1023).
+     */
+    public static final int DEFAULT_NODE_ID_BITS = NODE_ID_BITS_DEFAULT;
+
+    /**
+     * Alias for {@link #SEQUENCE_BITS_DEFAULT} to support alternative naming convention.
+     * Default number of bits used to represent the sequence within a millisecond which is {@code 12} bits supporting
+     * 4,096,000 ids per-second per-node.
+     */
+    public static final int DEFAULT_SEQUENCE_BITS = SEQUENCE_BITS_DEFAULT;
+
     private final int nodeIdAndSequenceBits;
     private final int sequenceBits;
     private final long maxNodeId;

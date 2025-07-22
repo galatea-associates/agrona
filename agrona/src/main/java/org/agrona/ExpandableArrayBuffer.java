@@ -135,6 +135,26 @@ public class ExpandableArrayBuffer extends AbstractMutableDirectBuffer
     }
 
     /**
+     * Get the current capacity of the buffer.
+     *
+     * @return the current capacity of the buffer in bytes.
+     */
+    public int capacity()
+    {
+        return capacity;
+    }
+
+    /**
+     * Get the underlying byte array backing this buffer.
+     *
+     * @return the underlying byte array.
+     */
+    public byte[] byteArray()
+    {
+        return byteArray;
+    }
+
+    /**
      * {@inheritDoc}
      */
     public int wrapAdjustment()

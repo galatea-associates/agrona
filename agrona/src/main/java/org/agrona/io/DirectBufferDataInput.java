@@ -377,16 +377,20 @@ public class DirectBufferDataInput implements DataInput
      * Reads in a string that has been encoded using UTF-8 format by
      * {@link org.agrona.MutableDirectBuffer#putStringUtf8(int, String)}.
      * <p>
-     * This is a thin wrapper over {@link DirectBuffer#getStringUtf8(int, ByteOrder)}. Honours byte order set by
-     * {@link #byteOrder(ByteOrder)}.
+     * This method reads a length-prefixed UTF-8 string from the buffer, where the length is stored as a 4-byte
+     * integer followed by the UTF-8 encoded bytes.
      *
-     * @return the String as represented by the ASCII encoded bytes.
+     * @return the String as represented by the UTF-8 encoded bytes.
      */
     public String readStringUTF8()
     {
-        final String stringUtf8 = buffer.getStringUtf8(position, byteOrder);
+        final int lengthBytes = buffer.getInt(position, byteOrder);
+        position += BitUtil.SIZE_OF_INT;
 
-        position += stringUtf8.length();
+        boundsCheck0(lengthBytes);
+        final String stringUtf8 = buffer.getStringWithoutLengthUtf8(position, lengthBytes);
+        position += lengthBytes;
+
         return stringUtf8;
     }
 
@@ -394,16 +398,20 @@ public class DirectBufferDataInput implements DataInput
      * Reads in a string that has been encoded using ASCII format by
      * {@link org.agrona.MutableDirectBuffer#putStringAscii(int, CharSequence)}.
      * <p>
-     * This is a thin wrapper over {@link DirectBuffer#getStringAscii(int, ByteOrder)}. Honours byte order set by
-     * {@link #byteOrder(ByteOrder)}
+     * This method reads a length-prefixed ASCII string from the buffer, where the length is stored as a 4-byte
+     * integer followed by the ASCII encoded bytes.
      *
      * @return the String as represented by the ASCII encoded bytes.
      */
     public String readStringAscii()
     {
-        final String stringAscii = buffer.getStringAscii(position, byteOrder);
+        final int lengthBytes = buffer.getInt(position, byteOrder);
+        position += BitUtil.SIZE_OF_INT;
 
-        position += stringAscii.length();
+        boundsCheck0(lengthBytes);
+        final String stringAscii = buffer.getStringWithoutLengthAscii(position, lengthBytes);
+        position += lengthBytes;
+
         return stringAscii;
     }
 

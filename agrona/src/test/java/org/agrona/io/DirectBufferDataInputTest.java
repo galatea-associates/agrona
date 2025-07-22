@@ -19,7 +19,9 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.ThrowingConsumer;
 
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutput;
+import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -27,11 +29,35 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-abstract class DirectBufferDataInputTest
+class DirectBufferDataInputTest
 {
-    abstract UnsafeBuffer toUnsafeBuffer(ThrowingConsumer<DataOutput> dataProvider) throws Throwable;
+    /**
+     * Converts data provider to an UnsafeBuffer for testing purposes.
+     * This method demonstrates how to create buffers from various data sources.
+     * 
+     * @param dataProvider function that writes data to a DataOutput
+     * @return UnsafeBuffer containing the provided data
+     * @throws Throwable if data writing fails
+     */
+    UnsafeBuffer toUnsafeBuffer(ThrowingConsumer<DataOutput> dataProvider) throws Throwable
+    {
+        final java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        final java.io.DataOutputStream dos = new java.io.DataOutputStream(baos);
+        dataProvider.accept(dos);
+        dos.flush();
+        return new UnsafeBuffer(baos.toByteArray());
+    }
 
-    abstract ByteOrder byteOrder();
+    /**
+     * Returns the byte order for buffer operations.
+     * Uses native byte order for optimal performance on the current platform.
+     * 
+     * @return the native byte order
+     */
+    ByteOrder byteOrder()
+    {
+        return ByteOrder.nativeOrder();
+    }
 
     @Test
     void shouldWrapBufferUsingConstructor() throws Throwable

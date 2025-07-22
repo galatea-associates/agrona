@@ -161,4 +161,43 @@ public class OneToOneConcurrentArrayQueue<E> extends AbstractConcurrentArrayQueu
 
         return count;
     }
+
+    /**
+     * Returns the number of elements currently in the queue.
+     * <p>
+     * This method provides a snapshot of the current queue size and may be stale by the time
+     * it returns due to concurrent modifications by producer and consumer threads.
+     *
+     * @return the number of elements in the queue at the time of the call.
+     */
+    public int size()
+    {
+        return (int)(tail - head);
+    }
+
+    /**
+     * Returns {@code true} if the queue contains no elements.
+     * <p>
+     * This method provides a snapshot check and may be stale by the time it returns
+     * due to concurrent modifications by producer and consumer threads.
+     *
+     * @return {@code true} if the queue is empty, {@code false} otherwise.
+     */
+    public boolean isEmpty()
+    {
+        return head == tail;
+    }
+
+    /**
+     * Returns the maximum capacity of this queue.
+     * <p>
+     * The capacity is fixed at construction time and represents the maximum number
+     * of elements that can be stored in the queue.
+     *
+     * @return the maximum capacity of the queue.
+     */
+    public int capacity()
+    {
+        return capacity;
+    }
 }

@@ -16,7 +16,18 @@
 package org.agrona.concurrent;
 
 /**
- * Idle strategy for use by threads when they do not have work to do.
+ * Core IdleStrategy interface defining backoff strategies for threads when they do not have work to do.
+ * <p>
+ * This interface provides pluggable backoff strategies for the concurrent agent framework, enabling optimal
+ * CPU utilization patterns through configurable idle behavior. Implementations range from busy spinning
+ * for ultra-low latency to parking strategies for resource conservation.
+ * <p>
+ * <b>Common Implementations:</b>
+ * <ul>
+ * <li>{@code BusySpinIdleStrategy} - Continuous polling for lowest latency</li>
+ * <li>{@code YieldingIdleStrategy} - Thread yielding for balanced performance</li>
+ * <li>{@code SleepingIdleStrategy} - Thread parking for resource conservation</li>
+ * </ul>
  * <p>
  * <b>Note regarding implementor state</b>
  * <p>
@@ -34,9 +45,11 @@ package org.agrona.concurrent;
 public interface IdleStrategy
 {
     /**
-     * Perform current idle action (e.g. nothing/yield/sleep). This method signature expects users to call into it on
-     * every work 'cycle'. The implementations may use the indication "workCount &gt; 0" to reset internal backoff
-     * state. This method works well with 'work' APIs which follow the following rules:
+     * Perform current backoff action based on work performed in the last duty cycle. This method signature expects 
+     * users to call into it on every work 'cycle'. The implementations may use the indication "workCount &gt; 0" 
+     * to reset internal backoff state, enabling progressive backoff strategies when no work is available.
+     * <p>
+     * This method works well with 'work' APIs which follow the following rules:
      * <ul>
      * <li>'work' returns a value larger than 0 when some work has been done</li>
      * <li>'work' returns 0 when no work has been done</li>
@@ -92,7 +105,10 @@ public interface IdleStrategy
     void reset();
 
     /**
-     * Simple name by which the strategy can be identified.
+     * Simple name by which the backoff strategy can be identified for debugging and monitoring purposes.
+     * <p>
+     * This is useful for logging, metrics collection, and configuration identification in systems that
+     * support multiple idle strategy implementations.
      *
      * @return simple name by which the strategy can be identified.
      */
